@@ -18,7 +18,6 @@ model:
     scale_factor: 0.18215
     use_ema: False
     
-
     scheduler_config: # 10000 warmup steps
       target: ldm.lr_scheduler.LambdaLinearScheduler
       params:
@@ -79,6 +78,7 @@ model:
         land_mark_id_seperate_layers: False
         multi_scale_ID: False # True was used for the previous training there is an issue
         sep_head_att: False
+        num_src_images: 2 # same as in config
         Additional_config:
           Reconstruct_initial: True
           Target_CLIP_feat: False
@@ -97,38 +97,33 @@ data:
       batch_size: 1
       wrap: False
       train:
-          target: ldm.data.celebA.CelebAdataset
+          target: ldm.data.our_dataset.WildFacesDataset
           params:
               state: train
-              dataset_dir: dataset/FaceData/CelebAMask-HQ/
+              dataset_dir: /home/m4xig1/code/face_hair_swap/data/final
               arbitrary_mask_percent: 0.5
               image_size: 512
               data_seed: 0
-              gray_outer_mask: True
-              remove_mask_tar: [1,2,4,5,8,9 ,6,7,10,11,12,17 ]
-              preserve_mask_src: [1,2,4,5,8,9 ,6,7,10,11,12,17 ]
+              n_src_imgs: 2
 
       validation:
-          target: ldm.data.celebA.CelebAdataset
+          target: ldm.data.our_dataset.WildFacesDataset
           params:
               state: validation
-              dataset_dir: dataset/FaceData/CelebAMask-HQ/
+              dataset_dir: /home/m4xig1/code/face_hair_swap/data/final
               arbitrary_mask_percent: 0.5
               image_size: 512
               data_seed: 0
-              gray_outer_mask: True
-              remove_mask_tar: [1,2,4,5,8,9 ,6,7,10,11,12,17 ]
-              preserve_mask_src: [1,2,4,5,8,9 ,6,7,10,11,12,17 ]
+              n_src_imgs: 2
       test:
-          target: ldm.data.celebA.CelebAdataset
+          target: ldm.data.our_dataset.WildFacesDataset
           params:
               state: test
-              dataset_dir: dataset/FaceData/CelebAMask-HQ/
+              dataset_dir: /home/m4xig1/code/face_hair_swap/data/final
               arbitrary_mask_percent: 0.5
               image_size: 512
-              gray_outer_mask: True
-              remove_mask_tar: [1,2,4,5,8,9 ,6,7,10,11,12,17 ]
-              preserve_mask_src: [1,2,4,5,8,9 ,6,7,10,11,12,13,17 ]
+              n_src_imgs: 2
+
 # lightning:
 #   trainer:
 #     max_epochs: 40
@@ -142,5 +137,5 @@ lightning:
   trainer:
     max_epochs: 20
     num_nodes: 1
-    accelerator: 'gpu'
-    gpus: "0,1"
+    accelerator: 'cpu'
+    # gpus: "0,1"

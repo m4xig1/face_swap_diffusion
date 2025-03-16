@@ -13,7 +13,7 @@ from PIL import Image
 
 from pytorch_lightning import seed_everything
 from pytorch_lightning.trainer import Trainer
-from pytorch_lightning.callbacks import ModelCheckpoint, Callback, LearningRateMonitor
+from pytorch_lightning.callbacks import ModelCheckpoint, Callback
 from pytorch_lightning.utilities.distributed import rank_zero_only
 from pytorch_lightning.utilities import rank_zero_info
 
@@ -732,7 +732,7 @@ if __name__ == "__main__":
                 # "log_momentum": True
             },
         },
-        "cuda_callback": {"target": "main.CUDACallback"},
+        # "cuda_callback": {"target": "main.CUDACallback"}, # TODO: uncomment for cuda training
     }
     if version.parse(pl.__version__) >= version.parse("1.4.0"):
         default_callbacks_cfg.update({"checkpoint_callback": modelckpt_cfg})
