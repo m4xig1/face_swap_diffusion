@@ -679,6 +679,7 @@ class LatentDiffusion(DDPM):
         self.num_src_images = cond_stage_config.other_params.num_src_images
         self.multi_scale_ID = cond_stage_config.other_params.multi_scale_ID # TODO: remove
 
+        self.Reconstruct_initial = cond_stage_config.other_params.Additional_config.Reconstruct_initial
         self.Reconstruct_DDIM_steps = cond_stage_config.other_params.Additional_config.Reconstruct_DDIM_steps
         self.sampler=DDIMSampler(self)
         # Initialize projection layers
@@ -701,6 +702,10 @@ class LatentDiffusion(DDPM):
         # Initialize loss functions
         self.lpips_loss = LPIPS(net_type="alex").to(self.device).eval()
         self.instantiate_IDLoss(cond_stage_config)  # loads arcface
+
+        self.LPIPS_loss_weight = cond_stage_config.other_params.Additional_config.LPIPS_loss_weight
+        self.ID_loss_weight = cond_stage_config.other_params.Additional_config.ID_loss_weight
+        self.Landmark_loss_weight = cond_stage_config.other_params.Additional_config.Landmark_loss_weight
 
         if not scale_by_std:
             self.scale_factor = scale_factor
@@ -1149,12 +1154,11 @@ class LatentDiffusion(DDPM):
         if self.model.conditioning_key is not None:
             assert c is not None
             if self.cond_stage_trainable:
-                
-                c=self.conditioning_with_feat(c)
+                c=self.get_learned_conditioning(c)
                     
-            if self.shorten_cond_schedule:  # TODO: drop this option
-                tc = self.cond_ids[t].to(self.device)
-                c = self.q_sample(x_start=c, t=tc, noise=torch.randn_like(c.float()))
+            # if self.shorten_cond_schedule:  # TODO: drop this option
+            #     tc = self.cond_ids[t].to(self.device)
+            #     c = self.q_sample(x_start=c, t=tc, noise=torch.randn_like(c.float()))
 
         # if self.u_cond_prop<self.u_cond_percent and self.training :
         #     if self.land_mark_id_seperate_layers or self.sep_head_att:
@@ -1165,7 +1169,8 @@ class LatentDiffusion(DDPM):
         #         return self.p_losses(x, conc, t, *args, **kwargs)
         #     return self.p_losses(x, self.learnable_vector.repeat(x.shape[0],1,1), t, *args, **kwargs)
         # else:  #x:[4,9,64,64] c:[4,1,768] x: img,inpaint_img,mask after first stage c:clip embedding
-            return self.p_losses(x, c, t, *args, **kwargs)
+
+        return self.p_losses(x, c, t, *args, **kwargs)
         
     def forward_face(self, x, c, reference, GT_tar, *args, **kwargs):
         t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
@@ -1189,9 +1194,10 @@ class LatentDiffusion(DDPM):
 
         return self.p_losses_face(x_start=x, cond=c, t=t, reference=reference, GT_tar=GT_tar, *args, **kwargs)
 
-    def apply_model(self, x_noisy, t, cond, return_ids=False):
+    def apply_model(self, x_noisy, t, cond, return_ids=False, return_features=False):
         """
         applies conditioning to noisy img (latent)
+        return_features (unused)
         """
         if isinstance(cond, dict):
             # hybrid case, cond is exptected to be a dict
@@ -1333,8 +1339,14 @@ class LatentDiffusion(DDPM):
         """
         p_losses without face loss
         """
-        noise = default(noise, lambda: torch.randn_like(x_start))
-        x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
+        if self.first_stage_key == 'inpaint':
+            # x_start=x_start[:,:4,:,:]
+            noise = default(noise, lambda: torch.randn_like(x_start[:,:4,:,:]))
+            x_noisy = self.q_sample(x_start=x_start[:,:4,:,:], t=t, noise=noise)
+            x_noisy = torch.cat((x_noisy,x_start[:,4:,:,:]),dim=1)
+        else:
+            noise = default(noise, lambda: torch.randn_like(x_start))
+            x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         model_output = self.apply_model(x_noisy, t, cond)
 
         loss_dict = {}
@@ -1349,7 +1361,8 @@ class LatentDiffusion(DDPM):
 
         loss_simple = self.get_loss(model_output, target, mean=False).mean([1, 2, 3])
         loss_dict.update({f"{prefix}/loss_simple": loss_simple.mean()})
-
+        
+        self.logvar = self.logvar.to(self.device)
         logvar_t = self.logvar[t].to(self.device)
         loss = loss_simple / torch.exp(logvar_t) + logvar_t
         # loss = loss_simple / torch.exp(self.logvar) + self.logvar
@@ -1433,7 +1446,7 @@ class LatentDiffusion(DDPM):
 
         if reference is not None:
             batch_size, n_src_imgs = reference.shape[:2]
-            reference = reference.view(-1, reference.shape[2:])[::n_src_imgs]
+            reference = reference.view(-1, *reference.shape[2:])[::n_src_imgs]
 
             reference = un_norm_clip(reference)
             reference = TF.normalize(reference, mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
