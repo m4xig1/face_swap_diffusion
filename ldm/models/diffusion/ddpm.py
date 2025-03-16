@@ -100,6 +100,7 @@ class IDLoss(nn.Module):
         self.face_pool_1 = torch.nn.AdaptiveAvgPool2d((256, 256))
         self.facenet = ArcFaceBackbone(input_size=112, num_layers=50, drop_ratio=0.6, mode="ir_se")
         self.facenet.load_state_dict(torch.load(opts.other_params.arcface_path, map_location="cpu")) # TODO: IMPORTANT, CHANGE TO GPU AFTER DEBUG
+        # self.facenet.load_state_dict(torch.load(opts.other_params.arcface_path), map_location="cuda")
         self.face_pool_2 = torch.nn.AdaptiveAvgPool2d((112, 112))
         self.facenet.eval()
 
@@ -118,7 +119,7 @@ class IDLoss(nn.Module):
         x = x[:, :, 35:223, 32:220]  # Crop interesting region
         x = self.face_pool_2(x)  # resize to 112 to fit pre-trained model
         x_feats = self.facenet(x, multi_scale=self.multiscale)
-        return x_feats
+        return x_feats  # [l2_norm(x)]
 
     def forward(self, y_hat, y, clip_img=True, return_seperate=False):
         n_samples = y.shape[0]
@@ -678,6 +679,8 @@ class LatentDiffusion(DDPM):
         self.num_src_images = cond_stage_config.other_params.num_src_images
         self.multi_scale_ID = cond_stage_config.other_params.multi_scale_ID # TODO: remove
 
+        self.Reconstruct_DDIM_steps = cond_stage_config.other_params.Additional_config.Reconstruct_DDIM_steps
+        self.sampler=DDIMSampler(self)
         # Initialize projection layers
         # TODO: init after cond stage
         self.clip_dim = 768
@@ -825,10 +828,12 @@ class LatentDiffusion(DDPM):
             assert hasattr(self.cond_stage_model, self.cond_stage_forward)
             clip_feats = getattr(self.cond_stage_model, self.cond_stage_forward)(x_src_flat)
         # clip_feats = self.cond_stage_model(x_src_flat)
+        # clip_feats: [B*N, 1, clip_dim]
+        clip_feats = clip_feats.squeeze(1)
         clip_feats = self.clip_proj(clip_feats)  # [B*N, clip_dim]
 
-        # Get ID features
-        id_feats = self.face_ID_model.encode(x_src_flat)  # [B*N, id_dim]
+        # Get ID features from ArcFace
+        id_feats = self.face_ID_model.extract_feats(x_src_flat)[0]  # [B*N, id_dim]
         id_feats = self.id_proj(id_feats)
 
         # Combine features
@@ -981,7 +986,7 @@ class LatentDiffusion(DDPM):
         z_trg_masked = self.get_first_stage_encoding(trg_masked_encoder_posterior).detach()
         mask_resize = Resize([z_trg.shape[-1], z_trg.shape[-1]])(mask)
 
-        z_new = torch.cat([z_trg, z_trg_masked, mask_resize])  # 9 channels
+        z_new = torch.cat([z_trg, z_trg_masked, mask_resize], dim=1)  # 9 channels
 
         # Create conditioning tensor
         if self.model.conditioning_key is not None:
@@ -1130,11 +1135,39 @@ class LatentDiffusion(DDPM):
     #     return [rescale_bbox(b) for b in bboxes]
 
     def shared_step(self, batch, **kwargs):
-        x, c, ref, gt_tar = self.get_input(batch, self.first_stage_key)
-        loss = self(x, c, reference=ref, GT_tar=gt_tar, **kwargs)
+        x, c= self.get_input(batch, self.first_stage_key)
+        loss = self(x, c, **kwargs)
+        return loss
+    def shared_step_face(self, batch, **kwargs):
+        x, c, ref, gt_tar = self.get_input(batch, self.first_stage_key, get_reference=True, get_gt=True)
+        loss = self.forward_face(x, c, reference=ref, GT_tar=gt_tar, **kwargs)
         return loss
 
-    def forward(self, x, c, reference, GT_tar, *args, **kwargs):
+    def forward(self, x, c, *args, **kwargs):
+        t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
+        self.u_cond_prop=random.uniform(0, 1)
+        if self.model.conditioning_key is not None:
+            assert c is not None
+            if self.cond_stage_trainable:
+                
+                c=self.conditioning_with_feat(c)
+                    
+            if self.shorten_cond_schedule:  # TODO: drop this option
+                tc = self.cond_ids[t].to(self.device)
+                c = self.q_sample(x_start=c, t=tc, noise=torch.randn_like(c.float()))
+
+        # if self.u_cond_prop<self.u_cond_percent and self.training :
+        #     if self.land_mark_id_seperate_layers or self.sep_head_att:
+        #         conc=self.learnable_vector.repeat(x.shape[0],1,1)
+        #         # concat c, landmarks
+        #         landmarks=landmarks.unsqueeze(1) if len(landmarks.shape)!=3 else landmarks
+        #         conc=torch.cat([conc, landmarks],dim=-1)
+        #         return self.p_losses(x, conc, t, *args, **kwargs)
+        #     return self.p_losses(x, self.learnable_vector.repeat(x.shape[0],1,1), t, *args, **kwargs)
+        # else:  #x:[4,9,64,64] c:[4,1,768] x: img,inpaint_img,mask after first stage c:clip embedding
+            return self.p_losses(x, c, t, *args, **kwargs)
+        
+    def forward_face(self, x, c, reference, GT_tar, *args, **kwargs):
         t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
         self.u_cond_prop = random.uniform(0, 1)
         if self.model.conditioning_key is not None:
@@ -1149,12 +1182,12 @@ class LatentDiffusion(DDPM):
         #         # concat c, landmarks
         #         landmarks=landmarks.unsqueeze(1) if len(landmarks.shape)!=3 else landmarks
         #         conc=torch.cat([conc, landmarks],dim=-1)
-        #         return self.p_losses(x, conc, t, *args, **kwargs)
-        #     return self.p_losses(x, self.learnable_vector.repeat(x.shape[0],1,1), t, *args, **kwargs)
+        #         return self.p_losses_face(x, conc, t, *args, **kwargs)
+        #     return self.p_losses_face(x, self.learnable_vector.repeat(x.shape[0],1,1), t, *args, **kwargs)
         # else:  #x:[4,9,64,64] c:[4,1,768] x: img,inpaint_img,mask after first stage c:clip embedding
-        #     return self.p_losses(x, c, t, *args, **kwargs)
+        #     return self.p_losses_face(x, c, t, *args, **kwargs)
 
-        return self.p_losses(x, c, t, reference, GT_tar, *args, **kwargs)
+        return self.p_losses_face(x_start=x, cond=c, t=t, reference=reference, GT_tar=GT_tar, *args, **kwargs)
 
     def apply_model(self, x_noisy, t, cond, return_ids=False):
         """
@@ -1296,7 +1329,7 @@ class LatentDiffusion(DDPM):
         kl_prior = normal_kl(mean1=qt_mean, logvar1=qt_log_variance, mean2=0.0, logvar2=0.0)
         return mean_flat(kl_prior) / np.log(2.0)
 
-    def __legacy_p_losses(self, x_start, cond, t, noise=None):
+    def p_losses(self, x_start, cond, t, noise=None):
         """
         p_losses without face loss
         """
@@ -1334,7 +1367,7 @@ class LatentDiffusion(DDPM):
 
         return loss, loss_dict
 
-    def p_losses(self, x_start, cond, t, reference=None, noise=None, GT_tar=None, landmarks=None):
+    def p_losses_face(self, x_start, cond, t, reference=None, noise=None, GT_tar=None, landmarks=None):
         if self.first_stage_key == "inpaint":
             # x_start=x_start[:,:4,:,:]
             noise = default(noise, lambda: torch.randn_like(x_start[:, :4, :, :]))
@@ -1937,7 +1970,8 @@ class LatentDiffusion(DDPM):
         if self.learn_logvar:
             print("Diffusion model optimizing logvar")
             params.append(self.logvar)
-        params.append(self.learnable_vector)
+
+        # params.append(self.learnable_vector) # TODO: use with cfg
 
         opt = torch.optim.AdamW(params, lr=lr)
         if self.use_scheduler:

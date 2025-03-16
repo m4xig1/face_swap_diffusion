@@ -133,8 +133,11 @@ class WildFacesDataset(Dataset):
         self.img_size = args["image_size"]
 
         self.clip_img_size = (224, 224)
-
-        json_path = osp.join(args["dataset_dir"], "all_gathered.json")
+        if args.get("json_path"):
+            json_path = args["json_path"]
+        else:
+            json_path = osp.join(args["dataset_dir"], "all_gathered.json")
+        
         with open(json_path, "r") as f:
             self.data = json.load(f)
 
@@ -142,7 +145,7 @@ class WildFacesDataset(Dataset):
         self.ids2samples = {}
         for id_key in self.data:
             for img_num in self.data[id_key]:
-                image_path = osp.join(args["dataset_dir"], f"data/{id_key}/{img_num}.jpg")
+                image_path = osp.join(args["dataset_dir"], f"{id_key}/{img_num}.jpg")
                 bbox = self.data[id_key][img_num]["new_face_crop"]  # Use original face crop
                 self.samples.append((id_key, img_num, image_path, bbox))
 
