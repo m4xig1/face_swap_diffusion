@@ -164,8 +164,6 @@ class CrossAttention(nn.Module):
         self.heads = heads  # 8
         self.dim_head = dim_head  # 40
         self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
-        # self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
-        # self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
 
         head_splits = [6, 2]
         self.head_splits = head_splits

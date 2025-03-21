@@ -26,6 +26,7 @@ from ldm.util import (
     mean_flat,
     count_params,
     instantiate_from_config,
+    # apply_lora_to_model,
 )
 from ldm.modules.ema import LitEma
 from ldm.modules.distributions.distributions import normal_kl, DiagonalGaussianDistribution
@@ -46,6 +47,8 @@ import wandb
 from PIL import Image
 import argparse
 
+from peft import LoraConfig, get_peft_model
+from ldm.util import instantiate_from_config
 
 # from ldm.modules.encoders.modules import FrozenCLIPTextEmbedder
 
@@ -99,7 +102,9 @@ class IDLoss(nn.Module):
         self.multiscale = multiscale
         self.face_pool_1 = torch.nn.AdaptiveAvgPool2d((256, 256))
         self.facenet = ArcFaceBackbone(input_size=112, num_layers=50, drop_ratio=0.6, mode="ir_se")
-        self.facenet.load_state_dict(torch.load(opts.other_params.arcface_path, map_location="cpu")) # TODO: IMPORTANT, CHANGE TO GPU AFTER DEBUG
+        self.facenet.load_state_dict(
+            torch.load(opts.other_params.arcface_path, map_location="cpu")
+        )  # TODO: IMPORTANT, CHANGE TO GPU AFTER DEBUG
         # self.facenet.load_state_dict(torch.load(opts.other_params.arcface_path), map_location="cuda")
         self.face_pool_2 = torch.nn.AdaptiveAvgPool2d((112, 112))
         self.facenet.eval()
@@ -658,6 +663,8 @@ class LatentDiffusion(DDPM):
         conditioning_key=None,
         scale_factor=1.0,
         scale_by_std=False,
+        use_lora=True,
+        lora_config=None,
         *args,
         **kwargs,
     ):
@@ -677,11 +684,11 @@ class LatentDiffusion(DDPM):
         self.cond_stage_trainable = cond_stage_trainable
         self.cond_stage_key = cond_stage_key
         self.num_src_images = cond_stage_config.other_params.num_src_images
-        self.multi_scale_ID = cond_stage_config.other_params.multi_scale_ID # TODO: remove
+        self.multi_scale_ID = cond_stage_config.other_params.multi_scale_ID  # TODO: remove
 
         self.Reconstruct_initial = cond_stage_config.other_params.Additional_config.Reconstruct_initial
         self.Reconstruct_DDIM_steps = cond_stage_config.other_params.Additional_config.Reconstruct_DDIM_steps
-        self.sampler=DDIMSampler(self)
+        self.sampler = DDIMSampler(self)
         # Initialize projection layers
         # TODO: init after cond stage
         self.clip_dim = 768
@@ -695,6 +702,13 @@ class LatentDiffusion(DDPM):
         self.instantiate_first_stage(first_stage_config)
         self.instantiate_cond_stage(cond_stage_config)
         self.cond_stage_forward = cond_stage_forward  # TODO: unused for now
+
+        self.use_lora = use_lora
+        self.lora_config = lora_config
+
+        if self.use_lora:
+            print("initializing LoRA...")
+            
 
         # TODO: is it Clsassifier-free guidance?
         # self.learnable_vector = nn.Parameter(torch.randn((1, 1, 768)), requires_grad=True)
@@ -716,6 +730,10 @@ class LatentDiffusion(DDPM):
         if ckpt_path is not None:
             self.init_from_ckpt(ckpt_path, ignore_keys)
             self.restarted_from_ckpt = True
+
+        if self.use_lora:
+            self._apply_lora()
+
 
     def instantiate_first_stage(self, config):
         """
@@ -786,6 +804,59 @@ class LatentDiffusion(DDPM):
             self.register_buffer("scale_factor", 1.0 / z.flatten().std())
             print(f"setting self.scale_factor to {self.scale_factor}")
             print("### USING STD-RESCALING ###")
+    
+    def _apply_lora(self, verbose=True):
+        """
+        Apply LoRA to the UNet model
+        """
+        rank = self.lora_config.rank
+        alpha = self.lora_config.alpha
+        dropout = self.lora_config.get("dropout", 0.0)
+        target_modules = self.lora_config.get("target_modules", None)
+        
+        if target_modules is None:
+            target_modules = self.find_cross_attention_modules()
+        
+        # Configure LoRA
+        lora_config = LoraConfig(
+            r=rank,
+            lora_alpha=alpha,
+            target_modules=target_modules,
+            lora_dropout=dropout,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
+        print(f"initializing LoRA layers for: {target_modules}")
+        
+        # Apply LoRA to the model
+        self.model.diffusion_model = get_peft_model(self.model.diffusion_model, lora_config)
+        
+        print(f"Applied LoRA with rank {rank}, alpha {alpha} to {len(target_modules)} modules")
+
+    def _find_cross_attention_modules(self):
+        """Find all cross-attention module names in the UNet model"""
+        target_module_names = []
+        # Helper function to recursively find modules
+        def find_modules_recursive(module, prefix=""):
+            for name, child in module.named_children():
+                full_name = f"{prefix}.{name}" if prefix else name
+        
+                # Check if this is a cross-attention module
+                if "attn" in name.lower() and hasattr(child, "to_q") and hasattr(child, "to_k") and hasattr(child, "to_v"):
+                    target_module_names.append(f"{full_name}.to_q")
+                    target_module_names.append(f"{full_name}.to_k")
+                    target_module_names.append(f"{full_name}.to_v")
+                    target_module_names.append(f"{full_name}.to_out.0")
+                
+                # Recursively search child modules
+                find_modules_recursive(child, full_name)
+        
+        # Start recursive search
+        find_modules_recursive(self.model.diffusion_model)
+        
+        return target_module_names
+
 
     def _get_denoise_row_from_list(self, samples, desc="", force_no_decoder_quantization=False):
         denoise_row = []
@@ -1140,9 +1211,10 @@ class LatentDiffusion(DDPM):
     #     return [rescale_bbox(b) for b in bboxes]
 
     def shared_step(self, batch, **kwargs):
-        x, c= self.get_input(batch, self.first_stage_key)
+        x, c = self.get_input(batch, self.first_stage_key)
         loss = self(x, c, **kwargs)
         return loss
+
     def shared_step_face(self, batch, **kwargs):
         x, c, ref, gt_tar = self.get_input(batch, self.first_stage_key, get_reference=True, get_gt=True)
         loss = self.forward_face(x, c, reference=ref, GT_tar=gt_tar, **kwargs)
@@ -1150,12 +1222,12 @@ class LatentDiffusion(DDPM):
 
     def forward(self, x, c, *args, **kwargs):
         t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
-        self.u_cond_prop=random.uniform(0, 1)
+        self.u_cond_prop = random.uniform(0, 1)
         if self.model.conditioning_key is not None:
             assert c is not None
             if self.cond_stage_trainable:
-                c=self.get_learned_conditioning(c)
-                    
+                c = self.get_learned_conditioning(c)
+
             # if self.shorten_cond_schedule:  # TODO: drop this option
             #     tc = self.cond_ids[t].to(self.device)
             #     c = self.q_sample(x_start=c, t=tc, noise=torch.randn_like(c.float()))
@@ -1171,7 +1243,7 @@ class LatentDiffusion(DDPM):
         # else:  #x:[4,9,64,64] c:[4,1,768] x: img,inpaint_img,mask after first stage c:clip embedding
 
         return self.p_losses(x, c, t, *args, **kwargs)
-        
+
     def forward_face(self, x, c, reference, GT_tar, *args, **kwargs):
         t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
         self.u_cond_prop = random.uniform(0, 1)
@@ -1339,11 +1411,11 @@ class LatentDiffusion(DDPM):
         """
         p_losses without face loss
         """
-        if self.first_stage_key == 'inpaint':
+        if self.first_stage_key == "inpaint":
             # x_start=x_start[:,:4,:,:]
-            noise = default(noise, lambda: torch.randn_like(x_start[:,:4,:,:]))
-            x_noisy = self.q_sample(x_start=x_start[:,:4,:,:], t=t, noise=noise)
-            x_noisy = torch.cat((x_noisy,x_start[:,4:,:,:]),dim=1)
+            noise = default(noise, lambda: torch.randn_like(x_start[:, :4, :, :]))
+            x_noisy = self.q_sample(x_start=x_start[:, :4, :, :], t=t, noise=noise)
+            x_noisy = torch.cat((x_noisy, x_start[:, 4:, :, :]), dim=1)
         else:
             noise = default(noise, lambda: torch.randn_like(x_start))
             x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
@@ -1361,7 +1433,7 @@ class LatentDiffusion(DDPM):
 
         loss_simple = self.get_loss(model_output, target, mean=False).mean([1, 2, 3])
         loss_dict.update({f"{prefix}/loss_simple": loss_simple.mean()})
-        
+
         self.logvar = self.logvar.to(self.device)
         logvar_t = self.logvar[t].to(self.device)
         loss = loss_simple / torch.exp(logvar_t) + logvar_t
@@ -1969,12 +2041,20 @@ class LatentDiffusion(DDPM):
 
     def configure_optimizers(self):
         lr = self.learning_rate
-        params = list(self.model.parameters())
+        params = []
+        if self.use_lora:
+            print(f"{self.__class__.__name__}: Training only LoRA parameters")
+            for name, param in self.model.named_parameters():
+                if "lora_" in name:
+                    params.append(param)
+        else:
+            params = list(self.model.parameters())
+
         if self.cond_stage_trainable:
             print(f"{self.__class__.__name__}: Also optimizing conditioner params!")
             params = (
                 params
-                + list(self.cond_stage_model.final_ln.parameters())
+                + list(self.cond_stage_model.final_ln.parameters()) # clip projectors?
                 + list(self.cond_stage_model.mapper.parameters())
                 + list(self.clip_proj.parameters())
                 + list(self.id_proj.parameters())
@@ -1987,6 +2067,7 @@ class LatentDiffusion(DDPM):
         # params.append(self.learnable_vector) # TODO: use with cfg
 
         opt = torch.optim.AdamW(params, lr=lr)
+        
         if self.use_scheduler:
             assert "target" in self.scheduler_config
             scheduler = instantiate_from_config(self.scheduler_config)

@@ -26,7 +26,7 @@ model:
         f_start: [ 1.e-6 ]
         f_max: [ 1. ]
         f_min: [ 1. ]
-
+    
     unet_config:
       target: ldm.modules.diffusionmodules.openaimodel.UNetModel
       params:
@@ -44,6 +44,13 @@ model:
         use_checkpoint: True
         legacy: False
         add_conv_in_front_of_unet: False
+
+    use_lora: true
+    lora_config:
+      rank: 4
+      alpha: 8
+      dropout: 0.1
+      target_modules: null
 
     first_stage_config:
       target: ldm.models.autoencoder.AutoencoderKL
@@ -100,7 +107,8 @@ data:
           target: ldm.data.our_dataset.WildFacesDataset
           params:
               state: train
-              dataset_dir: /home/m4xig1/code/face_hair_swap/data/final
+              dataset_dir: /home/aalanov/Bobkov_Denis/datasets/my_original/final
+              json_path: data/all_gathered.json
               arbitrary_mask_percent: 0.5
               image_size: 512
               data_seed: 0
@@ -110,7 +118,8 @@ data:
           target: ldm.data.our_dataset.WildFacesDataset
           params:
               state: validation
-              dataset_dir: /home/m4xig1/code/face_hair_swap/data/final
+              dataset_dir: /home/aalanov/Bobkov_Denis/datasets/my_original/final
+              json_path: data/all_gathered.json
               arbitrary_mask_percent: 0.5
               image_size: 512
               data_seed: 0
@@ -119,10 +128,12 @@ data:
           target: ldm.data.our_dataset.WildFacesDataset
           params:
               state: test
-              dataset_dir: /home/m4xig1/code/face_hair_swap/data/final
+              dataset_dir: /home/aalanov/Bobkov_Denis/datasets/my_original/final
+              json_path: data/all_gathered.json
               arbitrary_mask_percent: 0.5
               image_size: 512
               n_src_imgs: 2
+
 
 # lightning:
 #   trainer:
@@ -138,4 +149,4 @@ lightning:
     max_epochs: 20
     num_nodes: 1
     accelerator: 'cpu'
-    # gpus: "0,1"
+    gpus: "0,1"

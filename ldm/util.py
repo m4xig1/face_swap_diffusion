@@ -13,6 +13,8 @@ from queue import Queue
 from inspect import isfunction
 from PIL import Image, ImageDraw, ImageFont
 
+from peft import LoraConfig, get_peft_model
+from ldm.util import instantiate_from_config
 
 def log_txt_as_img(wh, xc, size=10):
     # wh a tuple of (width, height)
@@ -208,3 +210,43 @@ def parallel_data_prefetch(
         return out
     else:
         return gather_res
+
+
+def apply_lora_to_model(model, rank=4, alpha=8, target_modules=None, dropout=0.0):
+    """
+    Apply LoRA to a diffusion model.
+    
+    Args:
+        model: The diffusion model to apply LoRA to
+        rank: Rank of the low-rank matrices
+        alpha: Scaling factor for the LoRA layers
+        target_modules: List of module types to apply LoRA to (if None, will detect cross-attention modules)
+        dropout: Dropout probability for LoRA layers
+    
+    Returns:
+        The model with LoRA applied
+    """
+    # If no target modules specified, default to cross-attention modules
+    if target_modules is None:
+        # to_out = nn.Sequential(Linear,dropout)
+        target_modules = ["to_k", "to_q", "to_v", "to_out.0"]
+    
+    # Configure LoRA
+    lora_config = LoraConfig(
+        r=rank,
+        lora_alpha=alpha,
+        target_modules=target_modules,
+        lora_dropout=dropout,
+        bias="none",
+        # task_type="CAUSAL_LM",  # This is a placeholder, as diffusion models don't have a specific task type
+    )
+    
+    # Find all cross-attention modules if needed
+    # if target_modules == ["to_k", "to_q", "to_v", "to_out.0"]:
+    #     # This will be used to find all modules that match these patterns
+    #     pass
+    
+    # Apply LoRA to the model
+    peft_model = get_peft_model(model, lora_config)
+    
+    return peft_model
