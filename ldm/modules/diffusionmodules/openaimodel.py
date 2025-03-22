@@ -968,6 +968,9 @@ class UNetModel(nn.Module):
             return self.out(h), features
         else:
             return self.out(h)
+    
+    def __getattr__(self, name):
+        return super().__getattr__(name)
 
 
 class EncoderUNetModel(nn.Module):

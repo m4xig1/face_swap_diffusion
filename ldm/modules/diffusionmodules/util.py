@@ -158,16 +158,30 @@ class CheckpointFunction(torch.autograd.Function):
             # Tensors.
             shallow_copies = [x.view_as(x) for x in ctx.input_tensors]
             output_tensors = ctx.run_function(*shallow_copies)
+    
+        trainable_params = [p for p in ctx.input_params if p.requires_grad]
         input_grads = torch.autograd.grad(
             output_tensors,
-            ctx.input_tensors + ctx.input_params,
+            # ctx.input_tensors + ctx.input_params,
+            ctx.input_tensors + trainable_params,
             output_grads,
             allow_unused=True,
         )
+        full_grads = []
+        all_inputs = ctx.input_tensors + ctx.input_params
+        grad_index = 0
+        for tensor in all_inputs:
+            if tensor.requires_grad:
+                full_grads.append(input_grads[grad_index])
+                grad_index += 1
+            else:
+                full_grads.append(None)
+
         del ctx.input_tensors
         del ctx.input_params
         del output_tensors
-        return (None, None) + input_grads
+        # return (None, None) + input_grads
+        return (None, None) + tuple(full_grads)
 
 
 def timestep_embedding(timesteps, dim, max_period=10000, repeat_only=False):

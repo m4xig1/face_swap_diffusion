@@ -276,6 +276,12 @@ class BasicTransformerBlock(nn.Module):
             self._forward, (x, context), self.parameters(), self.checkpoint
         )
 
+        # filter trainable parameters
+        # trainable_parameters = [p for p in self.parameters() if p.requires_grad]
+        # return checkpoint(
+        #     self._forward, (x, context), trainable_parameters, self.checkpoint
+        # )
+
     def _forward(self, x, context=None):
         x = self.attn1(self.norm1(x)) + x
         x = self.attn2(self.norm2(x), context=context) + x

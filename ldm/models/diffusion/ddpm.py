@@ -815,7 +815,7 @@ class LatentDiffusion(DDPM):
         target_modules = self.lora_config.get("target_modules", None)
         
         if target_modules is None:
-            target_modules = self.find_cross_attention_modules()
+            target_modules = self._find_cross_attention_modules()
         
         # Configure LoRA
         lora_config = LoraConfig(
@@ -824,7 +824,7 @@ class LatentDiffusion(DDPM):
             target_modules=target_modules,
             lora_dropout=dropout,
             bias="none",
-            task_type="CAUSAL_LM",
+            # task_type="CAUSAL_LM",
         )
 
         print(f"initializing LoRA layers for: {target_modules}")

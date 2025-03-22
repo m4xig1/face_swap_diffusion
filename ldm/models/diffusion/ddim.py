@@ -589,7 +589,7 @@ class DDIMSampler(object):
         # sampling
         C, H, W = shape
         size = (batch_size, C, H, W)
-        print(f"Data shape for DDIM sampling is {size}, eta {eta}")
+        # print(f"Data shape for DDIM sampling is {size}, eta {eta}")
         # for param in self.model.first_stage_model.parameters():
         #     param.requires_grad = False
         samples, intermediates = self.ddim_sampling_train(

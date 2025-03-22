@@ -14,7 +14,6 @@ from inspect import isfunction
 from PIL import Image, ImageDraw, ImageFont
 
 from peft import LoraConfig, get_peft_model
-from ldm.util import instantiate_from_config
 
 def log_txt_as_img(wh, xc, size=10):
     # wh a tuple of (width, height)
