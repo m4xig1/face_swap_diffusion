@@ -137,7 +137,7 @@ class WildFacesDataset(Dataset):
             json_path = args["json_path"]
         else:
             json_path = osp.join(args["dataset_dir"], "all_gathered.json")
-        
+
         with open(json_path, "r") as f:
             self.data = json.load(f)
 
@@ -149,17 +149,24 @@ class WildFacesDataset(Dataset):
                 bbox = self.data[id_key][img_num]["new_face_crop"]  # Use original face crop
                 self.samples.append((id_key, img_num, image_path, bbox))
 
-        # Split samples based on state
-        total_samples = len(self.samples)
+        # Split samples by ids based on state
+        ids = list(self.data.keys())
+        total_samples = len(ids)
         if state == "train":
-            self.samples = self.samples[: int(0.8 * total_samples)]
+            ids = ids[: int(0.8 * total_samples)]
+            # self.samples = self.samples[: int(0.8 * total_samples)]
         elif state == "validation":
-            self.samples = self.samples[int(0.8 * total_samples) : int(0.9 * total_samples)]
+            ids = ids[int(0.8 * total_samples) : int(0.9 * total_samples)]
+            # self.samples = self.samples[int(0.8 * total_samples) : int(0.9 * total_samples)]
         else:  # 'test'
-            self.samples = self.samples[int(0.9 * total_samples) :]
+            ids = ids[int(0.9 * total_samples) :]
+            # self.samples = self.samples[int(0.9 * total_samples) :]
+        ids = ids[: int(len(ids) * fraction) + 1]
+        ids = set(ids)
+        self.samples = [sample for sample in self.samples if sample[0] in ids]
 
         # Apply fraction to limit dataset size
-        self.samples = self.samples[: int(len(self.samples) * fraction)]
+        # self.samples = self.samples[: int(len(self.samples) * fraction)]
 
         # Build ID to samples mapping for efficient reference image sampling
         self.ids2samples = {}
@@ -337,9 +344,16 @@ class WildFacesDataset(Dataset):
 
 if __name__ == "__main__":
     dataset = WildFacesDataset(
-        "train", n_src_imgs=2, dataset_dir="/home/m4xig1/code/face_hair_swap/data/final", image_size=512
+        "train",
+        n_src_imgs=2,
+        dataset_dir="/home/m4xig1/code/face_hair_swap/data/final/data",
+        json_path="/home/m4xig1/code/face_hair_swap/data/final/all_gathered.json",
+        image_size=512,
+        fraction=0.0001,
     )
-    sample = dataset[3]
+    print(dataset.ids2samples)
+    print(dataset.samples)
+    # sample = dataset[3]
     # T.functional.to_pil_image(sample["inpaint_image"]).save("./test_inpaint.jpeg")
     # T.functional.to_pil_image(sample["inpaint_mask"]).save("./test_inpaint_mask.jpeg")
     # T.functional.to_pil_image(sample["GT"]).save("./test_gt.jpeg")
