@@ -2054,8 +2054,8 @@ class LatentDiffusion(DDPM):
             print(f"{self.__class__.__name__}: Also optimizing conditioner params!")
             params = (
                 params
-                + list(self.cond_stage_model.final_ln.parameters()) # clip projectors?
-                + list(self.cond_stage_model.mapper.parameters())
+                # + list(self.cond_stage_model.final_ln.parameters()) # clip projectors?
+                # + list(self.cond_stage_model.mapper.parameters())
                 + list(self.clip_proj.parameters())
                 + list(self.id_proj.parameters())
                 + list(self.final_proj.parameters())

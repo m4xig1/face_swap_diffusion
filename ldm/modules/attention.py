@@ -4,8 +4,10 @@ import torch
 import torch.nn.functional as F
 from torch import nn, einsum
 from einops import rearrange, repeat
+import torch.utils
+import torch.utils.checkpoint
 
-from ldm.modules.diffusionmodules.util import checkpoint
+# from ldm.modules.diffusionmodules.util import checkpoint
 
 
 def exists(val):
@@ -272,9 +274,12 @@ class BasicTransformerBlock(nn.Module):
         self.checkpoint = checkpoint
 
     def forward(self, x, context=None):
-        return checkpoint(
-            self._forward, (x, context), self.parameters(), self.checkpoint
-        )
+        if self.checkpoint:
+            return torch.utils.checkpoint.checkpoint(self._forward, x, context, use_reentrant=False)
+        return self._forward(x, context)
+        # return checkpoint(
+        #     self._forward, (x, context), self.parameters(), self.checkpoint
+        # )
 
         # filter trainable parameters
         # trainable_parameters = [p for p in self.parameters() if p.requires_grad]
