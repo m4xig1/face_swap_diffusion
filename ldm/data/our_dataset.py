@@ -294,9 +294,9 @@ class WildFacesDataset(Dataset):
             same_id_indices = [i for i in self.ids2samples[id_key] if i != index]
             if self.n_src_imgs > len(same_id_indices):
                 print(f"WARN: too low imgs with id {id_key}, while sampling {self.n_src_imgs} src's")
-                ref_indices = random.choices(same_id_indices, self.n_src_imgs)
+                ref_indices = random.choices(same_id_indices, k=self.n_src_imgs)
             else:
-                ref_indices = random.sample(same_id_indices, self.n_src_imgs)
+                ref_indices = random.sample(same_id_indices, k=self.n_src_imgs)
 
             # Process each reference image
             for ref_idx in ref_indices:
