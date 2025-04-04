@@ -638,7 +638,7 @@ class DDIMSampler(object):
         unconditional_conditioning=None,
         **kwargs,
     ):
-        device = self.model.betas.device
+        device = self.model.betas.device # ?
         b = shape[0]
         if x_T is None:
             img = torch.randn(shape, device=device)
@@ -725,7 +725,7 @@ class DDIMSampler(object):
             if img_callback:
                 img_callback(pred_x0, i)
 
-            if index % log_every_t == 0 or index == total_steps - 1:
+            if index % log_every_t == 0 or index == total_steps - 1: # TODO: check if this is wrong
                 intermediates["x_inter"].append(img)
                 intermediates["pred_x0"].append(pred_x0)
 
@@ -750,9 +750,6 @@ class DDIMSampler(object):
         **kwargs,
     ):
         b, *_, device = *x.shape, x.device
-        # if 'test_model_kwargs' in kwargs:
-        #     kwargs=kwargs['test_model_kwargs']
-        #     x = torch.cat([x, kwargs['inpaint_image'], kwargs['inpaint_mask']],dim=1)
         if "rest" in kwargs:
             x = torch.cat((x, kwargs["rest"]), dim=1)
 

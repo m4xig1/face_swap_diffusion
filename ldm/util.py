@@ -249,3 +249,29 @@ def apply_lora_to_model(model, rank=4, alpha=8, target_modules=None, dropout=0.0
     peft_model = get_peft_model(model, lora_config)
     
     return peft_model
+
+import time
+import inspect
+
+class Profiler:
+    enabled = True
+
+    @staticmethod
+    def set_profiling(enabled: bool):
+        Profiler.enabled = enabled
+
+    @staticmethod
+    def profile_function(func):
+        def wrap(*args, **kwargs):
+            if not Profiler.enabled:
+                return func(*args, **kwargs)
+            # with torch.autograd.profiler.profile() as prof:
+            start_t = time.time()
+            result = func(*args, **kwargs)
+            end_t = time.time()
+
+            func_class = inspect.getmodule(func).__name__
+            print(f"Function '{func_class}:{func.__name__}' executed in {end_t - start_t:.6f} seconds")
+            # print(prof.key_averages().table(top_level_events_only=True, sort_by="cuda_time_total", row_limit=10))
+            return result
+        return wrap

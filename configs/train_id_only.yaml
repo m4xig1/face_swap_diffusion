@@ -87,7 +87,7 @@ model:
         sep_head_att: False
         num_src_images: 2 # same as in config
         Additional_config:
-          Reconstruct_initial: True
+          Reconstruct_initial: False
           Target_CLIP_feat: False
           Source_CLIP_feat: False
           Multiple_ID_losses: True

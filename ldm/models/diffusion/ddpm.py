@@ -829,7 +829,7 @@ class LatentDiffusion(DDPM):
 
         print(f"initializing LoRA layers for: {target_modules}")
         
-        # Apply LoRA to the model
+        # Apply LoRA to the Unet
         self.model.diffusion_model = get_peft_model(self.model.diffusion_model, lora_config)
         
         print(f"Applied LoRA with rank {rank}, alpha {alpha} to {len(target_modules)} modules")
@@ -1428,10 +1428,18 @@ class LatentDiffusion(DDPM):
             target = x_start
         elif self.parameterization == "eps":
             target = noise
+
         else:
             raise NotImplementedError()
+        
+        # TODO: add case self.parameterization == "x0"
+        mask = x_start[:, 8:, :, :] # last channel is a mask
+        model_output = noise * mask + (1.0 - mask) * model_output
+        num_pixels = torch.sum(1.0 - mask)
+        # scale loss since it's > 0 only for masked region
+        scale_loss = torch.prod(model_output.shape[2:]) / num_pixels if num_pixels > 0 else 1
 
-        loss_simple = self.get_loss(model_output, target, mean=False).mean([1, 2, 3])
+        loss_simple = self.get_loss(model_output, target, mean=False).mean([1, 2, 3]) * scale_loss
         loss_dict.update({f"{prefix}/loss_simple": loss_simple.mean()})
 
         self.logvar = self.logvar.to(self.device)
@@ -1444,6 +1452,7 @@ class LatentDiffusion(DDPM):
 
         loss = self.l_simple_weight * loss.mean()
 
+        # TODO: unused (original_elbo_weight = 0)
         loss_vlb = self.get_loss(model_output, target, mean=False).mean(dim=(1, 2, 3))
         loss_vlb = (self.lvlb_weights[t] * loss_vlb).mean()
         loss_dict.update({f"{prefix}/loss_vlb": loss_vlb})
@@ -1480,14 +1489,7 @@ class LatentDiffusion(DDPM):
         start_code = x_noisy_rec
         test_model_kwargs = None
 
-        # Here flipping the cond so that different sorce image will go to the model
-        # cond=torch.flip(cond,[0]) # 4,1,768
-        # flip references
-        # if not self.Same_image_reconstruct:
-        #     reference = torch.flip(reference, [0])  # 4,3,224,224
-        #     cond = self.get_learned_conditioning(reference.to(self.device)).float()
-
-        samples_ddim, sample_intermediates = self.sampler.sample_train(
+        _, sample_intermediates = self.sampler.sample_train(
             S=ddim_steps,
             conditioning=cond,
             batch_size=n_samples,
@@ -1504,6 +1506,7 @@ class LatentDiffusion(DDPM):
         other_pred_x_0 = sample_intermediates["pred_x0"]
         for i in range(len(other_pred_x_0)):
             other_pred_x_0[i] = self.differentiable_decode_first_stage(other_pred_x_0[i])
+            
         # x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
         # x_samples_ddim = x_samples_ddim.cpu().permute(0, 2, 3, 1).numpy()
 
