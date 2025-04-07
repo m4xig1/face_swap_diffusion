@@ -108,7 +108,7 @@ data:
           params:
               state: train
               dataset_dir: /home/aalanov/Bobkov_Denis/datasets/my_original/final
-              json_path: data/all_gathered.json
+              json_path: data/filtered_ids2.json
               arbitrary_mask_percent: 0.5
               image_size: 512
               data_seed: 0
@@ -119,7 +119,7 @@ data:
           params:
               state: validation
               dataset_dir: /home/aalanov/Bobkov_Denis/datasets/my_original/final
-              json_path: data/all_gathered.json
+              json_path: data/filtered_ids2.json
               arbitrary_mask_percent: 0.5
               image_size: 512
               data_seed: 0
@@ -129,7 +129,7 @@ data:
           params:
               state: test
               dataset_dir: /home/aalanov/Bobkov_Denis/datasets/my_original/final
-              json_path: data/all_gathered.json
+              json_path: data/filtered_ids2.json
               arbitrary_mask_percent: 0.5
               image_size: 512
               n_src_imgs: 2
@@ -148,5 +148,5 @@ lightning:
   trainer:
     max_epochs: 20
     num_nodes: 1
-    accelerator: 'cpu'
-    gpus: "0,1"
+    accelerator: 'gpu'
+    gpus: "0"

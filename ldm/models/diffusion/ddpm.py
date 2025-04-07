@@ -564,6 +564,7 @@ class DDPM(pl.LightningModule):
                 batch
             )  # changed by sanoojan : to add ID loss after reconstructing through DDIM
 
+        # print(loss_dict)
         self.log_dict(loss_dict, prog_bar=True, logger=True, on_step=True, on_epoch=True)
 
         self.log(
@@ -1437,28 +1438,30 @@ class LatentDiffusion(DDPM):
         model_output = noise * mask + (1.0 - mask) * model_output
         num_pixels = torch.sum(1.0 - mask)
         # scale loss since it's > 0 only for masked region
-        scale_loss = torch.prod(model_output.shape[2:]) / num_pixels if num_pixels > 0 else 1
+        
+        scale_loss = model_output.shape[2] * model_output.shape[3] / num_pixels if num_pixels > 0 else 1
 
         loss_simple = self.get_loss(model_output, target, mean=False).mean([1, 2, 3]) * scale_loss
-        loss_dict.update({f"{prefix}/loss_simple": loss_simple.mean()})
+        loss_dict.update({f"{prefix}/loss_simple": loss_simple.mean().item()})
 
         self.logvar = self.logvar.to(self.device)
         logvar_t = self.logvar[t].to(self.device)
         loss = loss_simple / torch.exp(logvar_t) + logvar_t
         # loss = loss_simple / torch.exp(self.logvar) + self.logvar
         if self.learn_logvar:
-            loss_dict.update({f"{prefix}/loss_gamma": loss.mean()})
-            loss_dict.update({"logvar": self.logvar.data.mean()})
+            loss_dict.update({f"{prefix}/loss_gamma": loss.mean().item()})
+            loss_dict.update({"logvar": self.logvar.data.mean().item()})
 
         loss = self.l_simple_weight * loss.mean()
 
         # TODO: unused (original_elbo_weight = 0)
         loss_vlb = self.get_loss(model_output, target, mean=False).mean(dim=(1, 2, 3))
         loss_vlb = (self.lvlb_weights[t] * loss_vlb).mean()
-        loss_dict.update({f"{prefix}/loss_vlb": loss_vlb})
+        loss_dict.update({f"{prefix}/loss_vlb": loss_vlb.item()})
         loss += self.original_elbo_weight * loss_vlb
-        loss_dict.update({f"{prefix}/loss": loss})
-
+        loss_dict.update({f"{prefix}/loss": loss.item()})
+        wandb.log(loss_dict)
+        
         return loss, loss_dict
 
     def p_losses_face(self, x_start, cond, t, reference=None, noise=None, GT_tar=None, landmarks=None):
@@ -1902,7 +1905,7 @@ class LatentDiffusion(DDPM):
         inpaint=False,
         plot_denoise_rows=False,
         plot_progressive_rows=False,
-        plot_diffusion_rows=True,
+        plot_diffusion_rows=False,
         **kwargs,
     ):
         use_ddim = ddim_steps is not None
@@ -1922,9 +1925,10 @@ class LatentDiffusion(DDPM):
             bs=N,
         )
         n_src_imgs = c.shape[1]
-        # take only 1 img from each src
-        c = c.view(-1, *c.shape[2:])[::n_src_imgs]
-        xc = c.view(-1, *xc.shape[2:])[::n_src_imgs]
+        # # take only 1 img from each src
+        # print(c.shape, xc.shape)
+        xc = xc[:, 0]
+        # xc = xc.view(-1, *xc.shape[2:])[::n_src_imgs] # [B, N_src, C, H, W] -> [B, C, H, W]
 
         N = min(x.shape[0], N)
         n_row = min(x.shape[0], n_row)
@@ -1949,7 +1953,8 @@ class LatentDiffusion(DDPM):
 
         if plot_diffusion_rows:
             diffusion_row = list()
-            z_start = z[:n_row]
+            
+            z_start = z[:n_row, :4] # take 4 channels to match z_trg_start
             for t in range(self.num_timesteps):
                 if t % self.log_every_t == 0 or t == self.num_timesteps - 1:
                     t = repeat(torch.tensor([t]), "1 -> b", b=n_row)
@@ -1978,6 +1983,7 @@ class LatentDiffusion(DDPM):
                 # samples, z_denoise_row = self.sample(cond=c, batch_size=N, return_intermediates=True)
             x_samples = self.decode_first_stage(samples)
             log["samples"] = x_samples
+            z_denoise_row = z_denoise_row["pred_x0"] # get predictions TODO: check if ddpm returns dict with the same format
             if plot_denoise_rows:
                 denoise_grid = self._get_denoise_row_from_list(z_denoise_row)
                 log["denoise_row"] = denoise_grid
@@ -1992,8 +1998,6 @@ class LatentDiffusion(DDPM):
                     samples, z_denoise_row = self.sample_log(
                         cond=c, batch_size=N, ddim=use_ddim, ddim_steps=ddim_steps, eta=ddim_eta, quantize_denoised=True
                     )
-                    # samples, z_denoise_row = self.sample(cond=c, batch_size=N, return_intermediates=True,
-                    #                                      quantize_denoised=True)
                 x_samples = self.decode_first_stage(samples.to(self.device))
                 log["samples_x0_quantized"] = x_samples
 
@@ -2005,7 +2009,6 @@ class LatentDiffusion(DDPM):
                 mask[:, h // 4 : 3 * h // 4, w // 4 : 3 * w // 4] = 0.0
                 mask = mask[:, None, ...]
                 with self.ema_scope("Plotting Inpaint"):
-
                     samples, _ = self.sample_log(
                         cond=c,
                         batch_size=N,

@@ -326,7 +326,7 @@ class WildFacesDataset(Dataset):
         result = {
             "GT": image_tensor,
             "inpaint_image": inpaint_tensor,
-            "inpaint_mask": 1 - mask_tensor,  # Invert mask to match CelebA format
+            "inpaint_mask": mask_tensor,
             "ref_imgs": ref_images_tensor,
         }
 
@@ -349,13 +349,14 @@ if __name__ == "__main__":
         dataset_dir="/home/m4xig1/code/face_hair_swap/data/final/data",
         json_path="/home/m4xig1/code/face_hair_swap/data/final/all_gathered.json",
         image_size=512,
-        fraction=0.0001,
+        fraction=0.1,
     )
-    print(dataset.ids2samples)
-    print(dataset.samples)
-    # sample = dataset[3]
-    # T.functional.to_pil_image(sample["inpaint_image"]).save("./test_inpaint.jpeg")
-    # T.functional.to_pil_image(sample["inpaint_mask"]).save("./test_inpaint_mask.jpeg")
-    # T.functional.to_pil_image(sample["GT"]).save("./test_gt.jpeg")
-    # T.functional.to_pil_image(sample["ref_imgs"][0]).save("./test_ref0.jpeg")
-    # T.functional.to_pil_image(sample["ref_imgs"][1]).save("./test_ref1.jpeg")
+    # print(len(dataset))
+    # print(dataset.ids2samples)
+    # print(dataset.samples)
+    sample = dataset[0]
+    T.functional.to_pil_image(sample["inpaint_image"]).save("./test_inpaint.jpeg")
+    T.functional.to_pil_image(sample["inpaint_mask"]).save("./test_inpaint_mask.jpeg")
+    T.functional.to_pil_image(sample["GT"]).save("./test_gt.jpeg")
+    T.functional.to_pil_image(sample["ref_imgs"][0]).save("./test_ref0.jpeg")
+    T.functional.to_pil_image(sample["ref_imgs"][1]).save("./test_ref1.jpeg")
