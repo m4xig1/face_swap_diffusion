@@ -630,11 +630,11 @@ if __name__ == "__main__":
             model.load_state_dict(ckpt_file, strict=False)
             print("Train from scratch!")
         else:
-            model.load_state_dict(
-                torch.load(opt.pretrained_model, map_location="cpu")["state_dict"],
-                strict=False,
-            )
-            print("Load Stable Diffusion v1-4!")
+            # model.load_state_dict(
+            #     torch.load(opt.pretrained_model, map_location="cpu")["state_dict"],
+            #     strict=False,
+            # )
+            # print("Load Stable Diffusion v1-4!")
 
     # Train_names=['attn1']
     # opt.train_cross_attn_only=True
@@ -723,15 +723,15 @@ if __name__ == "__main__":
         },
         "image_logger": {
             "target": "main.ImageLogger",
-            "params": {"batch_frequency": 500, "max_images": 4, "clamp": True},
+            "params": {"batch_frequency": 10, "max_images": 4, "clamp": True},
         },
-        "learning_rate_logger": {
-            "target": "main.LearningRateMonitor",
-            "params": {
-                "logging_interval": "step",
-                # "log_momentum": True
-            },
-        },
+        # "learning_rate_logger": {
+        #     "target": "main.LearningRateMonitor",
+        #     "params": {
+        #         "logging_interval": "step",
+        #         # "log_momentum": True
+        #     },
+        # },
         # "cuda_callback": {"target": "main.CUDACallback"}, # TODO: uncomment for cuda training
     }
     if version.parse(pl.__version__) >= version.parse("1.4.0"):
