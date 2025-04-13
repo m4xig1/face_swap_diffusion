@@ -669,11 +669,7 @@ class LatentDiffusion(DDPM):
         self.use_lora = use_lora
         self.lora_config = lora_config
 
-        if self.use_lora:
-            print("initializing LoRA...")
-
-        # TODO: is it Clsassifier-free guidance?
-        # self.learnable_vector = nn.Parameter(torch.randn((1, 1, 768)), requires_grad=True)
+        self.learnable_vector = nn.Parameter(torch.randn((1, 1, 768)), requires_grad=True)
 
         # Initialize loss functions
         self.lpips_loss = LPIPS(net_type="alex").to(self.device).eval()
@@ -694,6 +690,7 @@ class LatentDiffusion(DDPM):
             self.restarted_from_ckpt = True
 
         if self.use_lora:
+            print("initializing LoRA...")
             self._apply_lora()
 
     def instantiate_first_stage(self, config):
@@ -1165,7 +1162,7 @@ class LatentDiffusion(DDPM):
 
     def shared_step(self, batch, **kwargs):
         x, c, mask = self.get_input(batch, self.first_stage_key)
-        loss = self(x, c, mask=mask **kwargs)
+        loss = self(x, c, mask=mask, **kwargs)
         return loss
 
     def forward(self, x, c, *args, **kwargs):
@@ -1341,7 +1338,7 @@ class LatentDiffusion(DDPM):
             raise NotImplementedError()
 
         # TODO: add case self.parameterization == "x0"
-        if mask:
+        if mask is not None:
             model_output = noise * mask + (1.0 - mask) * model_output
             num_pixels = torch.sum(1.0 - mask)
             # scale loss since it's > 0 only for masked region
@@ -1520,10 +1517,10 @@ class LatentDiffusion(DDPM):
 
         for i in iterator:
             ts = torch.full((b,), i, device=self.device, dtype=torch.long)
-            if self.shorten_cond_schedule:
-                assert self.model.conditioning_key != "hybrid"
-                tc = self.cond_ids[ts].to(cond.device)
-                cond = self.q_sample(x_start=cond, t=tc, noise=torch.randn_like(cond))
+            # if self.shorten_cond_schedule:
+            #     assert self.model.conditioning_key != "hybrid"
+            #     tc = self.cond_ids[ts].to(cond.device)
+            #     cond = self.q_sample(x_start=cond, t=tc, noise=torch.randn_like(cond))
 
             img, x0_partial = self.p_sample(
                 img,
@@ -1595,10 +1592,10 @@ class LatentDiffusion(DDPM):
 
         for i in iterator:
             ts = torch.full((b,), i, device=device, dtype=torch.long)
-            if self.shorten_cond_schedule:
-                assert self.model.conditioning_key != "hybrid"
-                tc = self.cond_ids[ts].to(cond.device)
-                cond = self.q_sample(x_start=cond, t=tc, noise=torch.randn_like(cond))
+            # if self.shorten_cond_schedule:
+            #     assert self.model.conditioning_key != "hybrid"
+            #     tc = self.cond_ids[ts].to(cond.device)
+            #     cond = self.q_sample(x_start=cond, t=tc, noise=torch.randn_like(cond))
 
             img = self.p_sample(img, cond, ts, clip_denoised=self.clip_denoised, quantize_denoised=quantize_denoised)
             if mask is not None:
@@ -1660,7 +1657,7 @@ class LatentDiffusion(DDPM):
     @torch.no_grad()
     def sample_log(self, cond, batch_size, ddim, ddim_steps, **kwargs):
         if ddim:
-            ddim_sampler = DDIMSampler(self)
+            ddim_sampler = DDIMSampler(self) # TODO: init once
             shape = (self.channels, self.image_size, self.image_size)
             samples, intermediates = ddim_sampler.sample(ddim_steps, batch_size, shape, cond, verbose=False, **kwargs)
         else:
@@ -1679,7 +1676,7 @@ class LatentDiffusion(DDPM):
         ddim_eta=1.0,
         return_keys=None,
         quantize_denoised=True,
-        inpaint=False,
+        inpaint=True,
         plot_denoise_rows=False,
         plot_progressive_rows=False,
         plot_diffusion_rows=False,
@@ -1689,10 +1686,11 @@ class LatentDiffusion(DDPM):
         log = dict()
         # z = x_tar latent
         # c = condition of shape [bs, n_src, emb_dim]
+        # inpaint_mask = resized mask with (h, w) as z, previously from z
         # x = x_tar
         # xrec = reconstructed x_tar
         # xc = x_src of shape [bs, n_src, c, h, w]
-        z, c, x, xrec, xc, mask = self.get_input(
+        z, c, inpaint_mask, x, xrec, xc, mask = self.get_input(
             batch,
             self.first_stage_key,
             return_first_stage_outputs=True,
@@ -1748,40 +1746,43 @@ class LatentDiffusion(DDPM):
 
         if sample:
             # get denoise row
-            with self.ema_scope("Plotting"):
-                samples, z_denoise_row = self.sample_log(
-                    cond=c, batch_size=N, ddim=use_ddim, ddim_steps=ddim_steps, eta=ddim_eta
-                )
-                # samples, z_denoise_row = self.sample(cond=c, batch_size=N, return_intermediates=True)
-            x_samples = self.decode_first_stage(samples)
-            log["samples"] = x_samples
-            z_denoise_row = z_denoise_row[
-                "pred_x0"
-            ]  # get predictions TODO: check if ddpm returns dict with the same format
-            if plot_denoise_rows:
-                denoise_grid = self._get_denoise_row_from_list(z_denoise_row)
-                log["denoise_row"] = denoise_grid
+            # with self.ema_scope("Plotting"):
+            #     samples, z_denoise_row = self.sample_log(
+            #         cond=c, batch_size=N, ddim=use_ddim, ddim_steps=ddim_steps, eta=ddim_eta
+            #     )
+            #     samples, z_denoise_row = self.sample(cond=c, batch_size=N, return_intermediates=True)
+            # x_samples = self.decode_first_stage(samples)
+            # log["samples"] = x_samples
+            # z_denoise_row = z_denoise_row[
+            #     "pred_x0"
+            # ]  # get predictions TODO: check if ddpm returns dict with the same format
+            # if plot_denoise_rows:
+            #     denoise_grid = self._get_denoise_row_from_list(z_denoise_row)
+            #     log["denoise_row"] = denoise_grid
 
-            if (
-                quantize_denoised
-                and not isinstance(self.first_stage_model, AutoencoderKL)
-                and not isinstance(self.first_stage_model, IdentityFirstStage)
-            ):
-                # also display when quantizing x0 while sampling
-                with self.ema_scope("Plotting Quantized Denoised"):
-                    samples, z_denoise_row = self.sample_log(
-                        cond=c, batch_size=N, ddim=use_ddim, ddim_steps=ddim_steps, eta=ddim_eta, quantize_denoised=True
-                    )
-                x_samples = self.decode_first_stage(samples.to(self.device))
-                log["samples_x0_quantized"] = x_samples
+            # if (
+            #     quantize_denoised
+            #     and not isinstance(self.first_stage_model, AutoencoderKL)
+            #     and not isinstance(self.first_stage_model, IdentityFirstStage)
+            # ):
+            #     # also display when quantizing x0 while sampling
+            #     with self.ema_scope("Plotting Quantized Denoised"):
+            #         samples, z_denoise_row = self.sample_log(
+            #             cond=c, batch_size=N, ddim=use_ddim, ddim_steps=ddim_steps, eta=ddim_eta, quantize_denoised=True
+            #         )
+            #     x_samples = self.decode_first_stage(samples.to(self.device))
+            #     log["samples_x0_quantized"] = x_samples
 
             if inpaint:
                 # make a simple center square
-                b, h, w = z.shape[0], z.shape[2], z.shape[3]
-                mask = torch.ones(N, h, w).to(self.device)
+                # b, h, w = z.shape[0], z.shape[2], z.shape[3]
+                # mask = torch.ones(N, h, w).to(self.device)
                 # zeros will be filled in
-                mask[:, h // 4 : 3 * h // 4, w // 4 : 3 * w // 4] = 0.0
-                mask = mask[:, None, ...]
+                # mask[:, h // 4 : 3 * h // 4, w // 4 : 3 * w // 4] = 0.0
+                # mask = mask[:, None, ...]
+
+                # inpaint_mask = inpaint_mask[:, None, ...]
+                print("inpaint_mask shape:", inpaint_mask.shape)
                 with self.ema_scope("Plotting Inpaint"):
                     samples, _ = self.sample_log(
                         cond=c,
@@ -1790,16 +1791,16 @@ class LatentDiffusion(DDPM):
                         eta=ddim_eta,
                         ddim_steps=ddim_steps,
                         x0=z[:N],
-                        mask=mask,
+                        mask=inpaint_mask,
                     )
                 x_samples = self.decode_first_stage(samples.to(self.device))
                 log["samples_inpainting"] = x_samples
-                log["mask"] = mask
+                log["mask"] = inpaint_mask
 
                 # outpaint
                 with self.ema_scope("Plotting Outpaint"):
                     samples, _ = self.sample_log(
-                        cond=c, batch_size=N, ddim=use_ddim, eta=ddim_eta, ddim_steps=ddim_steps, x0=z[:N], mask=mask
+                        cond=c, batch_size=N, ddim=use_ddim, eta=ddim_eta, ddim_steps=ddim_steps, x0=z[:N], mask=inpaint_mask
                     )
                 x_samples = self.decode_first_stage(samples.to(self.device))
                 log["samples_outpainting"] = x_samples
@@ -1834,8 +1835,8 @@ class LatentDiffusion(DDPM):
             print(f"{self.__class__.__name__}: Also optimizing conditioner params!")
             params = (
                 params
-                # + list(self.cond_stage_model.final_ln.parameters()) # clip projectors?
-                # + list(self.cond_stage_model.mapper.parameters())
+                + list(self.cond_stage_model.final_ln.parameters()) # clip projectors?
+                + list(self.cond_stage_model.mapper.parameters())
                 + list(self.clip_proj.parameters())
                 + list(self.id_proj.parameters())
                 + list(self.final_proj.parameters())
@@ -1844,7 +1845,7 @@ class LatentDiffusion(DDPM):
             print("Diffusion model optimizing logvar")
             params.append(self.logvar)
 
-        # params.append(self.learnable_vector) # TODO: use with cfg
+        params.append(self.learnable_vector)
 
         opt = torch.optim.AdamW(params, lr=lr)
 
