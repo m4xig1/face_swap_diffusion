@@ -630,11 +630,11 @@ if __name__ == "__main__":
             model.load_state_dict(ckpt_file, strict=False)
             print("Train from scratch!")
         else:
-            # model.load_state_dict(
-            #     torch.load(opt.pretrained_model, map_location="cpu")["state_dict"],
-            #     strict=False,
-            # )
-            # print("Load Stable Diffusion v1-4!")
+            model.load_state_dict(
+                torch.load(opt.pretrained_model, map_location="cpu")["state_dict"],
+                strict=False,
+            )
+            print("Load Stable Diffusion v1-4!")
 
     # Train_names=['attn1']
     # opt.train_cross_attn_only=True
