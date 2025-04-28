@@ -1,5 +1,5 @@
 model:
-  base_learning_rate: 1.0e-04
+  base_learning_rate: 2.0e-04
   target: ldm.models.diffusion.ddpm.LatentDiffusion
   params:
     linear_start: 0.00085
@@ -7,7 +7,7 @@ model:
     num_timesteps_cond: 1
     log_every_t: 200
     timesteps: 1000
-    first_stage_key: "conditional"
+    first_stage_key: "inpaint"
     cond_stage_key: "image"
     image_size: 64
     channels: 4
@@ -28,7 +28,22 @@ model:
         f_min: [ 1. ]
     
     unet_config:
-      target: CompVis/stable-diffusion-v1-4
+      target: ldm.modules.diffusionmodules.openaimodel.UNetModel
+      params:
+        image_size: 32 # unused
+        in_channels: 9
+        out_channels: 4
+        model_channels: 320
+        attention_resolutions: [ 4, 2, 1 ]
+        num_res_blocks: 2
+        channel_mult: [ 1, 2, 4, 4 ]
+        num_heads: 8
+        use_spatial_transformer: True
+        transformer_depth: 1
+        context_dim: 768
+        use_checkpoint: True
+        legacy: False
+        add_conv_in_front_of_unet: False
 
     use_lora: false
     lora_config:
@@ -63,7 +78,7 @@ model:
     cond_stage_config:
       target: ldm.modules.encoders.modules.FrozenCLIPEmbedder
       other_params:
-        clip_weight: 1.0
+        clip_weight: 0.0
         ID_weight: 10.0
         arcface_path: "Other_dependencies/arcface/model_ir_se50.pth"
         concat_feat: False
@@ -72,7 +87,7 @@ model:
         sep_head_att: False
         num_src_images: 2 # same as in config
         Additional_config:
-          Reconstruct_initial: True # enables reconstruction and id loss
+          Reconstruct_initial: False
           Target_CLIP_feat: False
           Source_CLIP_feat: False
           Multiple_ID_losses: True
@@ -89,39 +104,41 @@ data:
       batch_size: 8
       wrap: False
       train:
-          target: ldm.data.our_dataset.WildFacesDataset
+          target: ldm.data.celebA.CelebAdataset
           params:
               state: train
-              dataset_dir: /home/aalanov/Bobkov_Denis/datasets/my_original/final
-              json_path: data/filtered_ids3.json
+              dataset_dir: /home/maignatov_2/REFace/dataset/FaceData/CelebAMask-HQ/
               arbitrary_mask_percent: 0.5
               image_size: 512
-              data_seed: 2
-              n_src_imgs: 1
-              fraction: 0.0001
+              data_seed: 0
+              gray_outer_mask: True
+              remove_mask_tar: [1,2,4,5,8,9 ,6,7,10,11,12,17 ]
+              preserve_mask_src: [1,2,4,5,8,9 ,6,7,10,11,12,17 ]
+              fraction: 0.02
 
       validation:
-          target: ldm.data.our_dataset.WildFacesDataset
+          target: ldm.data.celebA.CelebAdataset
           params:
               state: validation
-              dataset_dir: /home/aalanov/Bobkov_Denis/datasets/my_original/final
-              json_path: data/filtered_ids3.json
+              dataset_dir: /home/maignatov_2/REFace/dataset/FaceData/CelebAMask-HQ/
               arbitrary_mask_percent: 0.5
               image_size: 512
-              data_seed: 2
-              n_src_imgs: 1
-              fraction: 0.0001
+              data_seed: 0
+              gray_outer_mask: True
+              remove_mask_tar: [1,2,4,5,8,9 ,6,7,10,11,12,17 ]
+              preserve_mask_src: [1,2,4,5,8,9 ,6,7,10,11,12,17 ]
+              fraction: 0.02
       test:
-          target: ldm.data.our_dataset.WildFacesDataset
+          target: ldm.data.celebA.CelebAdataset
           params:
               state: test
-              dataset_dir: /home/aalanov/Bobkov_Denis/datasets/my_original/final
-              json_path: data/filtered_ids3.json
+              dataset_dir: /home/maignatov_2/REFace/dataset/FaceData/CelebAMask-HQ/
               arbitrary_mask_percent: 0.5
               image_size: 512
-              data_seed: 2
-              n_src_imgs: 1
-              fraction: 0.0001
+              gray_outer_mask: True
+              remove_mask_tar: [1,2,4,5,8,9 ,6,7,10,11,12,17 ]
+              preserve_mask_src: [1,2,4,5,8,9 ,6,7,10,11,12,13,17 ]
+              fraction: 0.02
 
 
 # lightning:
