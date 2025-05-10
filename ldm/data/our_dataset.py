@@ -107,6 +107,31 @@ def decow(mask, scale=0.5):
     mask_np = mask_np.transpose(0, 3, 1, 2)
     return torch.from_numpy(mask_np).to(mask.device)
 
+def get_bigger_crop(img, crop, scale=0.2):
+    # to square crop 
+    if crop[3] - crop[1] < crop[2] - crop[0]:
+        diff = crop[2] - crop[0] - (crop[3] - crop[1])
+        if diff % 2 != 0:
+            crop[0] -= 1
+            diff += 1
+        crop[3] += diff // 2
+        crop[1] -= diff // 2
+    elif crop[2] - crop[0] < crop[3] - crop[1]:
+        diff = crop[3] - crop[1] - (crop[2] - crop[0])
+        if diff % 2 != 0:
+            crop[1] -= 1
+            diff += 1
+        crop[2] += diff // 2
+        crop[0] -= diff // 2
+    assert crop[3] - crop[1] == crop[2] - crop[0], crop
+
+    # upscale crop
+    to_add = int((crop[3] - crop[1]) * scale)
+    h, w, _ = np.array(img).shape
+    crop = [max(0, crop[0] - to_add), max(0, crop[1] - to_add), min(w, crop[2] + to_add), min(h, crop[3] + to_add)]
+    cropped_arr = np.array(img)[crop[1]:crop[3], crop[0]:crop[2]]
+    return Image.fromarray(cropped_arr)
+
 
 class WildFacesDataset(Dataset):
     def __init__(self, state, arbitrary_mask_percent=0, load_vis_img=False, label_transform=None, fraction=1.0, **args):
@@ -146,7 +171,7 @@ class WildFacesDataset(Dataset):
         for id_key in self.data:
             for img_num in self.data[id_key]:
                 image_path = osp.join(args["dataset_dir"], f"{id_key}/{img_num}.jpg")
-                bbox = self.data[id_key][img_num]["new_face_crop"]  # Use original face crop
+                bbox = self.data[id_key][img_num]["new_face_crop"]
                 self.samples.append((id_key, img_num, image_path, bbox))
 
         # Split samples by ids based on state
@@ -190,6 +215,8 @@ class WildFacesDataset(Dataset):
         # Image pairs indices
         self.indices = np.arange(len(self.samples))
         self.length = len(self.indices)
+
+        # np.random.shuffle(self.samples)
 
     @staticmethod
     def interpolate_bbox(bbox, img_size, target_size: Union[int, tuple] = (512, 512)):
@@ -342,7 +369,8 @@ class WildFacesDataset(Dataset):
                 ref_indices = random.choices(same_id_indices, k=self.n_src_imgs)
             else:
                 ref_indices = random.sample(same_id_indices, k=self.n_src_imgs)
-
+            
+            # ref_img = cropped gt
             # ref_indices = [index] # TODO: убрать после теста
 
             # Process each reference image
@@ -351,7 +379,8 @@ class WildFacesDataset(Dataset):
 
                 ref_img = Image.open(ref_path).convert("RGB")
                 # TODO: add transforms if needed
-                ref_img = ref_img.crop(bbox).resize((224, 224))
+                # ref_img = ref_img.crop(bbox).resize((224, 224))
+                ref_img = get_bigger_crop(ref_img, bbox, scale=0.05).resize((224, 224))
                 ref_img_tensor = get_tensor_clip()(ref_img)
                 ref_images_tensors.append(ref_img_tensor)
         else:

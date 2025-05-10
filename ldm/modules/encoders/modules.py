@@ -256,43 +256,16 @@ class FrozenCLIPEmbedder(nn.Module):
 
         self.model = CLIPModel.from_pretrained(version)
         # self.processor = CLIPProcessor.from_pretrained(version)
-        self.tokenizer = CLIPTokenizer.from_pretrained(version)
-        self.final_ln = LayerNorm(1024)
-        self.mapper = Transformer(
-            1,
-            1024,
-            5,
-            1,
-        )
-        self.final_ln2 = LayerNorm(768)
-        self.mapper2 = Transformer(
-            1,
-            768,
-            5,
-            1,
-        )
-
-        self.projection_back = nn.Linear(768, 1024)
-
+        # self.tokenizer = CLIPTokenizer.from_pretrained(version)
         self.freeze()
 
     def freeze(self):
         self.model = self.model.eval()
-        for param in self.parameters():
-            param.requires_grad = False
-        for param in self.mapper2.parameters():
-            param.requires_grad = True
-        for param in self.final_ln2.parameters():
-            param.requires_grad = True
+        # for param in self.parameters():
+        #     param.requires_grad = False
 
     def forward(self, image):
-        outputs = self.model.vision_model(pixel_values=image)
-        z = outputs.pooler_output
-        z = self.model.visual_projection(z)
-        z = z.unsqueeze(1)
-        z = self.mapper2(z)
-        z = self.final_ln2(z)
-        return z
+        return self.model.get_image_features(image)
 
     def encode(self, image):
         return self(image)

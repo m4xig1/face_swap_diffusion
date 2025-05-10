@@ -31,12 +31,87 @@ def un_norm_clip(x1):
     return x
 
 
+class IDLoss(nn.Module):
+    def __init__(
+        self, path="Other_dependencies/arcface/model_ir_se50.pth", multiscale=False
+    ):
+        super(IDLoss, self).__init__()
+        print("Loading ResNet ArcFace")
+
+        self.multiscale = multiscale
+        self.face_pool_1 = torch.nn.AdaptiveAvgPool2d((256, 256))
+        self.facenet = Backbone(
+            input_size=112, num_layers=50, drop_ratio=0.6, mode="ir_se"
+        )
+        # self.facenet=iresnet100(pretrained=False, fp16=False) # changed by sanoojan
+
+        self.facenet.load_state_dict(torch.load(path))
+
+        self.face_pool_2 = torch.nn.AdaptiveAvgPool2d((112, 112))
+        self.facenet.eval()
+
+        self.set_requires_grad(False)
+
+    def set_requires_grad(self, flag=True):
+        for p in self.parameters():
+            p.requires_grad = flag
+
+    def extract_feats(self, x, clip_img=True):
+        # breakpoint()
+        if clip_img:
+            x = un_norm_clip(x)
+            x = TF.normalize(x, mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+        x = (
+            self.face_pool_1(x) if x.shape[2] != 256 else x
+        )  # (1) resize to 256 if needed
+        x = x[:, :, 35:223, 32:220]  # (2) Crop interesting region
+        x = self.face_pool_2(x)  # (3) resize to 112 to fit pre-trained model
+        # breakpoint()
+        x_feats = self.facenet(x, multi_scale=self.multiscale)
+
+        # x_feats = self.facenet(x) # changed by sanoojan
+        return x_feats
+
+    def forward(self, y_hat, y, clip_img=True, return_seperate=False):
+        n_samples = y.shape[0]
+        y_feats_ms = self.extract_feats(
+            y, clip_img=clip_img
+        )  # Otherwise use the feature from there
+
+        y_hat_feats_ms = self.extract_feats(y_hat, clip_img=clip_img)
+        y_feats_ms = [y_f.detach() for y_f in y_feats_ms]
+
+        loss_all = 0
+        sim_improvement_all = 0
+        seperate_losses = []
+        for y_hat_feats, y_feats in zip(y_hat_feats_ms, y_feats_ms):
+
+            loss = 0
+            sim_improvement = 0
+            count = 0
+
+            for i in range(n_samples):
+                sim_target = y_hat_feats[i].dot(y_feats[i])
+                sim_views = y_feats[i].dot(y_feats[i])
+
+                seperate_losses.append(1 - sim_target)
+                loss += 1 - sim_target  # id loss
+                sim_improvement += float(sim_target) - float(sim_views)
+                count += 1
+
+            loss_all += loss / count
+            sim_improvement_all += sim_improvement / count
+
+        return loss_all, sim_improvement_all, None
+
+
 class DDIMSampler(object):
     def __init__(self, model, schedule="linear", **kwargs):
         super().__init__()
         self.model = model
         self.ddpm_num_timesteps = model.num_timesteps
         self.schedule = schedule
+        # self.ID_LOSS=IDLoss()
 
     def register_buffer(self, name, attr):
         if type(attr) == torch.Tensor:
@@ -268,8 +343,9 @@ class DDIMSampler(object):
                 intermediates["x_inter"].append(img)
                 intermediates["pred_x0"].append(pred_x0)
                 
-        if mask is not None: 
+        if mask is not None:
             img = x0 * mask + (1.0 - mask) * img
+
         return img, intermediates
 
     @torch.no_grad()
@@ -297,10 +373,10 @@ class DDIMSampler(object):
             x = torch.cat([x, kwargs["inpaint_image"], kwargs["inpaint_mask"]], dim=1)
         elif "rest" in kwargs:
             x = torch.cat((x, kwargs["rest"]), dim=1)
-        else:
-            raise Exception(
-                "kwargs must contain either 'test_model_kwargs' or 'rest' key"
-            )
+        # else:
+        #     raise Exception(
+        #         "kwargs must contain either 'test_model_kwargs' or 'rest' key"
+        #     )
         if unconditional_conditioning is None or unconditional_guidance_scale == 1.0:
             e_t = self.model.apply_model(x, t, c)
         else:  # check @ sanoojan
@@ -345,7 +421,6 @@ class DDIMSampler(object):
         # current prediction for x_0
         if x.shape[1] != 4:
             pred_x0 = (x[:, :4, :, :] - sqrt_one_minus_at * e_t) / a_t.sqrt()
-            # G_id=ID_LOSS
             seperate_sim = None
             src_im = None
             if src_im is not None:
@@ -409,10 +484,10 @@ class DDIMSampler(object):
             x = torch.cat([x, kwargs["inpaint_image"], kwargs["inpaint_mask"]], dim=1)
         elif "rest" in kwargs:
             x = torch.cat((x, kwargs["rest"]), dim=1)
-        else:
-            raise Exception(
-                "kwargs must contain either 'test_model_kwargs' or 'rest' key"
-            )
+        # else:
+        #     raise Exception(
+        #         "kwargs must contain either 'test_model_kwargs' or 'rest' key"
+        #     )
         if unconditional_conditioning is None or unconditional_guidance_scale == 1.0:
             e_t = self.model.apply_model(x, t, c)
         else:  # check @ sanoojan
